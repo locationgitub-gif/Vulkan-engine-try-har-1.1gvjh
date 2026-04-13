@@ -144,14 +144,14 @@ RE_UNIFORM = re.compile(
 
 # Regex para 'in TYPE NAME;' ou 'attribute TYPE NAME;' sem layout
 RE_IN = re.compile(
-    r'^(?!.*\blayout\b)[ \t]*(?:in|attribute)\s+'
+    r'^(?!.*\blayout\b)[ \t]*(?:(?:\w+\s+)*)(?:in|attribute)\s+'
     r'((?:\w+\s+)*\w+)\s+(\w+)\s*;[ \t]*$',
     re.MULTILINE
 )
 
-# Regex para 'out TYPE NAME;' sem layout
+# Regex para 'out TYPE NAME;' ou 'flat out TYPE NAME;' sem layout
 RE_OUT = re.compile(
-    r'^(?!.*\blayout\b)[ \t]*out\s+'
+    r'^(?!.*\blayout\b)[ \t]*(?:(?:\w+\s+)*)out\s+'
     r'((?:\w+\s+)*\w+)\s+(\w+)\s*;[ \t]*$',
     re.MULTILINE
 )
@@ -169,8 +169,26 @@ def patch_glsl(source: str, stage: str) -> str:
     Converte GLSL OpenGL 150 → Vulkan 450.
     stage: 'vert' ou 'frag'
     """
+    # 0. Resolver #moj_import
+    def resolve_import(m):
+        filename = m.group(1)
+        import_path = os.path.join(PREPROCESSED_DIR, filename)
+        if os.path.exists(import_path):
+            with open(import_path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+            # Remover #version dos includes
+            content = re.sub(r'#version\s+\d+\b[^\n]*\n', '', content)
+            return content
+        else:
+            return f'// ERROR: moj_import "{filename}" not found\n'
+    source = re.sub(r'#moj_import\s+<([^>]+)>', resolve_import, source)
+
     # 1. Versão
     source = re.sub(r'#version\s+\d+\b[^\n]*', '#version 450', source)
+    source = '#version 450\n#extension GL_ARB_shader_draw_parameters : require\n' + source[source.find('\n')+1:] if '#version' in source else source
+
+    # Substituir gl_VertexID por gl_VertexIndex
+    source = source.replace('gl_VertexID', 'gl_VertexIndex')
 
     # 2. Recolher uniformes e substituí-los
     ubo_members = []          # linhas para o UBO block
